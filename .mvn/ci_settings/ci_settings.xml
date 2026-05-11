@@ -1,0 +1,28 @@
+<settings xmlns="http://maven.apache.org/SETTINGS/1.1.0" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+    xsi:schemaLocation="http://maven.apache.org/SETTINGS/1.1.0 http://maven.apache.org/xsd/settings-1.1.0.xsd">
+    <servers>
+        <server>
+            <id>oneweb-maven-central</id>
+        </server>
+        <server>
+            <id>oneweb-snapshots</id>
+            <username>NEXUS_USER</username>
+            <password>NEXUS_PASSWORD</password>
+        </server>
+
+        <server>
+            <id>oneweb-release</id>
+            <username>NEXUS_USER</username>
+            <password>NEXUS_PASSWORD</password>
+        </server>
+    </servers>
+
+    <mirrors>
+        <mirror>
+            <id>Central</id>
+            <mirrorOf>central</mirrorOf>
+            <name>OneWeb Maven Central Mirror</name>
+            <url>https://nexus.ow.net/repository/oneweb-all/</url>
+        </mirror>
+    </mirrors>
+</settings>

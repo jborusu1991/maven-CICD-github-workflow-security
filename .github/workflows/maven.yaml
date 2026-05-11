@@ -1,0 +1,386 @@
+# .github/workflows/ci-cd.yml
+
+name: Maven CI/CD to AWS ECR
+
+on:
+  push:
+    branches:
+      - feat/**
+      - main 
+
+  pull_request:
+    branches:
+      - main
+
+permissions:
+  contents: write
+  security-events: write
+
+  # REQUIRED for AWS OIDC authentication
+  id-token: write
+
+concurrency:
+  group: ecr-ci-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  AWS_REGION: eu-west-2
+  JAVA_VERSION: "21"
+  
+  ECR_REGISTRY: ${{ vars.ECR_REGISTRY }}
+
+  ECR_REPOSITORY: ${{ vars.ECR_REPOSITORY }}
+
+jobs:
+
+  # =========================================================
+  # BUILD + TEST
+  # =========================================================
+  build-test:
+    name: Build & Test
+    runs-on: ubuntu-latest
+
+    container:
+      image: maven:3.9.9-eclipse-temurin-21
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Cache Maven Repository
+        uses: actions/cache@v4
+        with:
+          path: /github/home/.m2/repository
+          key: maven-${{ runner.os }}-${{ hashFiles('**/pom.xml') }}
+          restore-keys: |
+            maven-${{ runner.os }}-
+
+      - name: Inject secret into file
+        run: |
+          sed -i 's|NEXUS_USER|${{ secrets.NEXUS_PASSWORD }}|g' .mnv/ci_settings/ci_settings.xml  
+          sed -i 's|NEXUS_PASSWORD|${{ secrets.NEXUS_PASSWORD }}|g' .mnv/ci_settings/ci_settings.xml    
+
+      - name: Run Tests
+        run: |
+          keytool -import -trustcacerts -alias nexu-ca -file ${{ vars.nexu-ca }} -keystore "$JAVA_HOME/lib/security/cacerts" -storepass changeit -noprompt
+          mvn --settings .mnv/ci_settings/ci_settings.xml -B clean verify
+
+      - name: Upload Reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-reports
+          path: |
+            **/target/surefire-reports/*
+            **/target/failsafe-reports/*
+
+
+# =========================================================
+# SEMGREP SAST SCAN/SUPPLY CHAIN/SECRET SCANS
+# =========================================================
+
+
+  semgrep:
+    runs-on: ubuntu-latest
+    needs:
+      - build-test
+    container:
+      image: semgrep/semgrep:latest
+    env:
+      SEMGREP_APP_TOKEN: ${{ secrets.SEMGREP_APP_TOKEN }}
+      SEMGREP_REPO_NAME: ${{ github.repository }}
+      SEMGREP_BRANCH: ${{ github.head_ref }}  
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Run Semgrep (PR diff-aware)
+        if: github.event_name == 'pull_request'
+        run: |
+          semgrep ci
+
+      - name: Run Semgrep (main branch full scan)
+        if: github.ref == 'refs/heads/main'
+        run: |
+          semgrep ci
+
+  # =========================================================
+  # BUILD + PUSH IMAGE TO ECR
+  # =========================================================
+  docker-build-push:
+    name: Build & Push to Amazon ECR
+    runs-on: ubuntu-latest
+
+    needs:
+      - build-test
+      - semgrep
+
+    outputs:
+      image-uri: ${{ steps.image.outputs.image }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Inject secret into file
+        run: |
+          sed -i 's|NEXUS_USER|${{ secrets.NEXUS_PASSWORD }}|g' .mnv/ci_settings/ci_settings.xml  
+          sed -i 's|NEXUS_PASSWORD|${{ secrets.NEXUS_PASSWORD }}|g' .mnv/ci_settings/ci_settings.xml  
+
+      # =====================================================
+      # AWS AUTH USING OIDC
+      # =====================================================
+      - name: Configure AWS Credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_GITHUB_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Login to Amazon ECR
+        id: login-ecr
+        uses: aws-actions/amazon-ecr-login@v2
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Generate Tags
+        id: vars
+        run: |
+          SHORT_SHA=$(echo $GITHUB_SHA | cut -c1-7)
+          echo "SHORT_SHA=$SHORT_SHA" >> $GITHUB_ENV
+
+      - name: Build and Push Image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: ./Dockerfile
+
+          push: true
+
+          tags: |
+            ${{ env.ECR_REGISTRY }}/${{ env.ECR_REPOSITORY }}:${{ env.SHORT_SHA }}
+            
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+          platforms: linux/amd64,linux/arm64
+
+      - name: Export Image URI
+        id: image
+        run: |
+          echo "image=${{ env.ECR_REGISTRY }}/${{ env.ECR_REPOSITORY }}:${{ env.SHORT_SHA }}" >> $GITHUB_OUTPUT
+  # =========================================================
+  # Conatiner Image scanning -Trivy
+  # =========================================================
+
+  trivy:
+    name: Trivy Scan (ECR Image)
+    needs:
+     - docker-build-push
+
+    runs-on: ubuntu-latest
+
+    container:
+      image: aquasec/trivy:latest
+
+    env:
+      IMAGE_TAG: ${{ github.sha }}
+
+      TRIVY_REPORT_FORMAT: cyclonedx
+      TRIVY_REPORT_OUTPUT_PATH: trivy-sbom-image.cdx.json
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: arn:aws:iam::123456789012:role/github-actions-ecr-role
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Login to Amazon ECR
+        uses: aws-actions/amazon-ecr-login@v2
+
+      - name: Cache Trivy DB
+        uses: actions/cache@v4
+        with:
+          path: /root/.cache/trivy
+          key: trivy-db-v1
+          restore-keys: |
+            trivy-db-
+      - name: Trivy Version
+        run: trivy --version
+
+      - name: Clean Trivy scan cache
+        run: trivy clean --scan-cache
+
+      - name: Generate Tags
+        id: vars
+        run: |
+          SHORT_SHA=$(echo $GITHUB_SHA | cut -c1-7)
+          echo "SHORT_SHA=$SHORT_SHA" >> $GITHUB_ENV  
+
+      - name: Generate SBOM (ECR image)
+        run: |
+          trivy image \
+            --format "${TRIVY_REPORT_FORMAT}" \
+            --output "${TRIVY_REPORT_OUTPUT_PATH}" \
+            $ECR_REGISTRY/$ECR_REPOSITORY:$SHORT_SHA
+
+      - name: Scan HIGH/CRITICAL vulnerabilities
+        run: |
+          trivy image \
+            --skip-db-update \
+            --skip-java-db-update \
+            --severity HIGH,CRITICAL \
+            $ECR_REGISTRY/$ECR_REPOSITORY:$SHORT_SHA
+
+      - name: Enforce security gate
+        run: |
+          trivy image \
+            --skip-db-update \
+            --skip-java-db-update \
+            --exit-code 1 \
+            --severity HIGH,CRITICAL \
+            $ECR_REGISTRY/$ECR_REPOSITORY:$SHORT_SHA
+
+      - name: Upload SBOM artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: trivy-sbom
+          path: trivy-sbom-image.cdx.json
+          retention-days: 30
+
+  dependency_track:
+    name: Upload SBOM to Dependency Track
+    runs-on: ubuntu-latest
+    container:
+     image: docker:24.0.5-cli
+    needs: trivy
+
+    if: github.ref == 'refs/heads/main'
+
+    env:
+     DEPENDENCY_URL: ${{ secrets.DEPENDENCY_URL }}
+     TRACK_API_KEY: ${{ secrets.TRACK_API_KEY }}
+     PROJECT_NAME: ${{ github.repository }}
+     PROJECT_VERSION: ${{ github.ref_name }}
+
+    steps:
+    - name: Download SBOM artifact
+      uses: actions/download-artifact@v4
+      with:
+        name: trivy-sbom
+        path: .
+
+    - name: Upload SBOM to Dependency Track
+      run: |
+        curl -X PUT "http://$DEPENDENCY_URL/api/v1/bom" \
+          -H "Content-Type: multipart/form-data" \
+          -H "X-Api-Key: $TRACK_API_KEY" \
+          -F "bom=@trivy-sbom-image.cdx.json" \
+          -F "project=$PROJECT_NAME}" \
+          -F "projectVersion=$PROJECT_VERSION"        
+  # =========================================================
+  # DEV DEPLOY
+  # =========================================================
+  deploy-dev:
+    name: Deploy Dev
+    runs-on: ubuntu-latest
+
+    needs: docker-build-push
+
+    if: github.ref != 'refs/heads/main'
+
+    env:
+        PAT_TOKEN: ${{ secrets.PAT_TOKEN }}
+
+    environment:
+      name: dev
+      url: https://dev.example.com
+
+    container:
+      image: amazon/aws-cli:2
+
+    steps: 
+      - name: Deploy to Dev
+        run: |
+          SHORT_SHA=$(echo $GITHUB_SHA | cut -c1-7)
+          sed 's/IMAGE_TAG/$SHORT_SHA/' ./helm_chart/values-dev.yaml
+      - name: Commit and push changes
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+
+          git add values-dev.yaml
+          git commit -m "Update image tag to $SHORT_SHA [skip ci]" || echo "No changes to commit"
+          git push    
+
+  # =========================================================
+  # STAGING DEPLOY
+  # =========================================================
+  deploy-staging:
+    name: Deploy Staging
+    runs-on: ubuntu-latest
+    env:
+        PAT_TOKEN: ${{ secrets.PAT_TOKEN }}
+
+    needs: docker-build-push
+
+    if: github.ref == 'refs/heads/main'
+
+    environment:
+      name: staging
+      url: https://staging.example.com
+
+    container:
+      image: amazon/aws-cli:2
+
+    steps:
+      - name: Deploy to Staging
+        run: |
+          SHORT_SHA=$(echo $GITHUB_SHA | cut -c1-7)
+          sed 's/IMAGE_TAG/$SHORT_SHA/' ./helm_chart/values-stage.yaml
+      - name: Commit and push changes
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+
+          git add values-stage.yaml
+          git commit -m "Update image tag to $SHORT_SHA [skip ci]" || echo "No changes to commit"
+          git push      
+
+  # =========================================================
+  # PROD DEPLOY
+  # =========================================================
+  deploy-prod:
+    name: Deploy Production
+    runs-on: ubuntu-latest
+    env:
+        PAT_TOKEN: ${{ secrets.PAT_TOKEN }}
+
+    needs: docker-build-push
+
+    if: github.ref == 'refs/heads/main'
+
+    environment:
+      name: prod
+      url: https://app.example.com
+
+    container:
+      image: amazon/aws-cli:2
+
+    steps:
+      - name: Deploy to Production
+        run: |
+          SHORT_SHA=$(echo $GITHUB_SHA | cut -c1-7)
+          sed 's/IMAGE_TAG/$SHORT_SHA/' ./helm_chart/values-prod.yaml
+      - name: Commit and push changes
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+
+          git add values-prod.yaml
+          git commit -m "Update image tag to $SHORT_SHA [skip ci]" || echo "No changes to commit"
+          git push      
