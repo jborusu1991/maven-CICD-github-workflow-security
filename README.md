@@ -110,108 +110,109 @@ Generates SBOM (CycloneDX format)
 Enforces security gate:
 Fails pipeline if HIGH/CRITICAL vulnerabilities found
 
-Uploads SBOM artifact
-📦 5. Dependency Tracking Upload
+Uploads SBOM artifact<br>
+📦 5. Dependency Tracking Upload<br>
 
-Tool: OWASP Dependency-Track
+Tool: OWASP Dependency-Track<br>
 
-📌 Job: dependency_track
-Runs only on:
-main branch
-Depends on:
-trivy
-What it does:
-Downloads SBOM artifact
-Uploads it to Dependency Track server
-Registers project version as branch name
+📌 Job: dependency_track<br>
+Runs only on: main branch <br>
+Depends on: trivy<br>
+What it does: <br>
+Downloads SBOM artifact<br>
+Uploads it to Dependency Track server<br>
+Registers project version as branch name<br>
 
 ☁️ 6. Dev Deployment (GitOps Trigger)
-📌 Job: deploy-dev
-Runs on:
-❗ NOT main
-Only feature branches (feat/**)
-Depends on:
-docker-build-push
-What it does:
-Updates values-dev.yaml with new image tag
-Commits change to repo
-Pushes back to branch
-Result:
-Triggers Argo CD sync for Dev environment
+
+📌 Job: deploy-dev<br>
+Runs on:<br>
+❗ NOT main<br>
+Only feature branches (feat/**)<br>
+Depends on:docker-build-push<br>
+What it does:<br>
+Updates values-dev.yaml with new image tag<br>
+Commits change to repo<br>
+Pushes back to branch<br>
+Result: Triggers Argo CD sync for Dev environment<br>
 
 🧪 7. Staging Deployment
+
 📌 Job: deploy-staging
-Runs on:
-main branch only
-Depends on:
-docker-build-push
-What it does:
-Updates values-stage.yaml
-Commits and pushes change
-Triggers Argo CD staging deployment
-Requires:
-Typically manual approval in GitHub Environments
+Runs on:<br>
+main branch only<br>
+Depends on: docker-build-push <br>
+What it does: <br>
+Updates values-stage.yaml<br>
+Commits and pushes change<br>
+Triggers Argo CD staging deployment<br>
+Requires:<br>
+Typically manual approval in GitHub Environments<br>
 
 🚀 8. Production Deployment
-📌 Job: deploy-prod
-Runs on:
-main branch only
-Depends on:
-docker-build-push
-What it does:
-Updates values-prod.yaml
-Commits and pushes changes
-Triggers Argo CD production deployment
-Requires:
-Approval via GitHub Environments (recommended)
-⚠️ Important Notes (Beginner-friendly)
-1. GitOps model used here
 
-Instead of deploying directly to Kubernetes, this pipeline:
+📌 Job: deploy-prod<br>
+Runs on:<br>
+main branch only<br>
+Depends on: docker-build-push<br>
+What it does:<br>
+Updates values-prod.yaml<br>
+Commits and pushes changes<br>
+Triggers Argo CD production deployment <br>
+Requires:<br>
+Approval via GitHub Environments (recommended)<br>
 
-updates YAML files
-commits them to Git
+Important Notes:<br>
 
-Then:
+1. GitOps model used here<br>
 
-👉 Argo CD detects changes and deploys automatically.
+Instead of deploying directly to Kubernetes, this pipeline:<br>
+
+updates YAML files<br>
+commits them to Git<br>
+
+Then:<br>
+
+👉 Argo CD detects changes and deploys automatically.<br>
 
 2. Branch behavior summary
-🔹 Feature branches (feat/**)
-Build & test
-Security scan
-Docker build
-Dev deployment only
-🔹 Main branch (main)
-Full CI pipeline
-Security scans
-Docker build & push
-Staging deployment
-Production deployment
-🔹 Pull Requests → main
-Build & test only
-Semgrep scan
-No deployments
-🧠 3. Key Architecture Idea
 
-This pipeline follows:
+🔹 Feature branches (feat/**)<br>
+Build & test<br>
+Security scan<br>
+Docker build<br>
+Dev deployment only<br>
+🔹 Main branch (main)<br>
+Full CI pipeline<br>
+Security scans<br>
+Docker build & push<br>
+Staging deployment<br>
+Production deployment<br>
+🔹 Pull Requests → main<br>
+Build & test only<br>
+Semgrep scan<br>
+No deployments<br>
 
-CI → Security → Build → Image → GitOps → Argo CD Deploy
+🧠 3. Key Architecture Idea<br>
 
-Developer Commit
+This pipeline follows:<br>
+
+CI → Security → Build → Image → GitOps → Argo CD Deploy<br>
+
+Developer Commit<br>
       ↓
-GitHub Actions CI
-  ├─ Build + Test (Maven)
-  ├─ Semgrep SAST
-  ├─ Docker Build
-  ├─ Push to ECR
-  ├─ Trivy Scan + SBOM
+GitHub Actions CI<br>
+  ├─ Build + Test (Maven)<br>
+  ├─ Semgrep SAST<br>
+  ├─ Docker Build<br>
+  ├─ Push to ECR<br>
+  ├─ Trivy Scan + SBOM<br>
+      ↓<br>
+Update values.yaml (GitOps repo state)<br>
+      ↓<br>
+Git Commit Push<br>
       ↓
-Update values.yaml (GitOps repo state)
-      ↓
-Git Commit Push
-      ↓
-Argo CD detects change
-      ↓
-Kubernetes Deployment (Dev / Stage / Prod)
+Argo CD detects change<br>
+      ↓<br>
+Kubernetes Deployment (Dev / Stage / Prod)<br>
 
