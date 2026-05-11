@@ -1,4 +1,4 @@
-# .github/workflows/ci-cd.yml
+# .github/workflows/maven.yml
 
 name: Maven CI/CD to AWS ECR
 
@@ -7,10 +7,12 @@ on:
     branches:
       - feat/**
       - main 
+      - master
 
   pull_request:
     branches:
       - main
+      - master
 
 permissions:
   contents: write
@@ -89,7 +91,7 @@ jobs:
     env:
       SEMGREP_APP_TOKEN: ${{ secrets.SEMGREP_APP_TOKEN }}
       SEMGREP_REPO_NAME: ${{ github.repository }}
-      SEMGREP_BRANCH: ${{ github.head_ref }}  
+      SEMGREP_BRANCH: ${{ github.head_ref != '' && github.head_ref || github.ref_name }} 
 
     steps:
       - name: Checkout code
@@ -184,8 +186,6 @@ jobs:
       image: aquasec/trivy:latest
 
     env:
-      IMAGE_TAG: ${{ github.sha }}
-
       TRIVY_REPORT_FORMAT: cyclonedx
       TRIVY_REPORT_OUTPUT_PATH: trivy-sbom-image.cdx.json
 
@@ -213,20 +213,14 @@ jobs:
         run: trivy --version
 
       - name: Clean Trivy scan cache
-        run: trivy clean --scan-cache
-
-      - name: Generate Tags
-        id: vars
-        run: |
-          SHORT_SHA=$(echo $GITHUB_SHA | cut -c1-7)
-          echo "SHORT_SHA=$SHORT_SHA" >> $GITHUB_ENV  
+        run: trivy clean --scan-cache 
 
       - name: Generate SBOM (ECR image)
         run: |
           trivy image \
             --format "${TRIVY_REPORT_FORMAT}" \
             --output "${TRIVY_REPORT_OUTPUT_PATH}" \
-            $ECR_REGISTRY/$ECR_REPOSITORY:$SHORT_SHA
+            ${{ needs.docker-build-push.ouputs.image }}
 
       - name: Scan HIGH/CRITICAL vulnerabilities
         run: |
@@ -234,7 +228,7 @@ jobs:
             --skip-db-update \
             --skip-java-db-update \
             --severity HIGH,CRITICAL \
-            $ECR_REGISTRY/$ECR_REPOSITORY:$SHORT_SHA
+            ${{ needs.docker-build-push.ouputs.image }}
 
       - name: Enforce security gate
         run: |
@@ -243,7 +237,7 @@ jobs:
             --skip-java-db-update \
             --exit-code 1 \
             --severity HIGH,CRITICAL \
-            $ECR_REGISTRY/$ECR_REPOSITORY:$SHORT_SHA
+            ${{ needs.docker-build-push.ouputs.image }}
 
       - name: Upload SBOM artifact
         uses: actions/upload-artifact@v4
@@ -306,15 +300,14 @@ jobs:
     steps: 
       - name: Deploy to Dev
         run: |
-          SHORT_SHA=$(echo $GITHUB_SHA | cut -c1-7)
-          sed 's/IMAGE_TAG/$SHORT_SHA/' ./helm_chart/values-dev.yaml
+          sed 's/IMAGE_TAG/${{ needs.docker-build-push.ouputs.image }}/' ./helm_chart/values-dev.yaml
       - name: Commit and push changes
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
 
           git add values-dev.yaml
-          git commit -m "Update image tag to $SHORT_SHA [skip ci]" || echo "No changes to commit"
+          git commit -m "Update image tag to ${{ needs.docker-build-push.ouputs.image }}" || echo "No changes to commit"
           git push    
 
   # =========================================================
@@ -340,15 +333,14 @@ jobs:
     steps:
       - name: Deploy to Staging
         run: |
-          SHORT_SHA=$(echo $GITHUB_SHA | cut -c1-7)
-          sed 's/IMAGE_TAG/$SHORT_SHA/' ./helm_chart/values-stage.yaml
+          sed 's/IMAGE_TAG/${{ needs.docker-build-push.ouputs.image }}/' ./helm_chart/values-stage.yaml
       - name: Commit and push changes
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
 
           git add values-stage.yaml
-          git commit -m "Update image tag to $SHORT_SHA [skip ci]" || echo "No changes to commit"
+          git commit -m "Update image tag to ${{ needs.docker-build-push.ouputs.image }}" || echo "No changes to commit"
           git push      
 
   # =========================================================
@@ -374,13 +366,12 @@ jobs:
     steps:
       - name: Deploy to Production
         run: |
-          SHORT_SHA=$(echo $GITHUB_SHA | cut -c1-7)
-          sed 's/IMAGE_TAG/$SHORT_SHA/' ./helm_chart/values-prod.yaml
+          sed 's/IMAGE_TAG/${{ needs.docker-build-push.ouputs.image }}/' ./helm_chart/values-prod.yaml
       - name: Commit and push changes
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
 
           git add values-prod.yaml
-          git commit -m "Update image tag to $SHORT_SHA [skip ci]" || echo "No changes to commit"
+          git commit -m "Update image tag to ${{ needs.docker-build-push.ouputs.image }}" || echo "No changes to commit"
           git push      
