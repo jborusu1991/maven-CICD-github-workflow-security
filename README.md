@@ -36,21 +36,22 @@ Argo CD deploys to Kubernetes<br>
 
 
 🧱 1. Build & Test Job
-📌 Job: build-test
-Runs on:
-feat/** branches
-main
-Pull Requests targeting main
-What it does:
-Checks out code
-Caches Maven dependencies
-Runs:
-Unit tests
-Integration tests
-Uploads test reports as artifacts
-Output:
-Verified build artifacts
-Test reports -- unit test reports and Code coverage report using Jacoco plugin
+
+📌 Job: build-test<br>
+Runs on:<br>
+feat/** branches<br>
+main<br>
+Pull Requests targeting main<br>
+What it does:<br>
+Checks out code<br>
+Caches Maven dependencies<br>
+Runs:<br>
+Unit tests<br>
+Integration tests<br>
+Uploads test reports as artifacts<br>
+Output:<br>
+Verified build artifacts<br>
+Test reports -- unit test reports and Code coverage report using Jacoco plugin<br>
 
 🔍 2. Semgrep Security Scan
 
@@ -203,7 +204,7 @@ Developer Commit<br>
       ↓
 GitHub Actions CI<br>
   ├─ Build + Test (Maven)<br>
-  ├─ Semgrep SAST<br>
+  ├─ Semgrep SAST,SCA,Secret scanning<br>
   ├─ Docker Build<br>
   ├─ Push to ECR<br>
   ├─ Trivy Scan + SBOM<br>
