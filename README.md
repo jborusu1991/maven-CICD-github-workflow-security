@@ -7,32 +7,34 @@ Maven + AWS ECR + Trivy + Semgrep + Argo CD GitOps
 
 This pipeline automates:
 
-Build & test Java (Maven)
-Security scanning (SAST + container scanning)
-Docker image build & push to AWS ECR
-SBOM generation
-GitOps deployment via updated values.yaml files (triggering Argo CD)
-🌿 Branch Strategy Overview
-Branch	Purpose	What happens
-feat/**	Feature development branches	Full CI + Dev deployment
-main	Production branch	Full CI + Staging + Production pipeline
-Pull Requests → main	Code validation	Build + tests + security scans only
-🔄 High-Level Pipeline Flow
-Push / PR
-   ↓
-Build & Test (Maven)
-   ↓
-Semgrep SAST Scan
-   ↓
-Docker Build & Push (ECR)
-   ↓
-Trivy Container Scan + SBOM
-   ↓
-Dependency Track Upload (main only)
-   ↓
-Update values.yaml (GitOps trigger)
-   ↓
-Argo CD deploys to Kubernetes
+Build & test Java (Maven)<br>
+Security scanning (SAST + container scanning)<br>
+Docker image build & push to AWS ECR<br>
+SBOM generation<br>
+GitOps deployment via updated values.yaml files (triggering Argo CD)<br>
+🌿 Branch Strategy Overview<br>
+Branch	Purpose	What happens<br>
+feat/**	Feature development branches	Full CI + Dev deployment<br>
+main	Production branch	Full CI + Staging + Production pipeline<br>
+Pull Requests → main	Code validation	Build + tests + security scans only<br>
+🔄 High-Level Pipeline Flow<br>
+Push / PR<br>
+   ↓<br>
+Build & Test (Maven)<br>
+   ↓<br>
+Semgrep SAST Scan<br>
+   ↓<br>
+Docker Build & Push (ECR)<br>
+   ↓<br>
+Trivy Container Scan + SBOM<br>
+   ↓<br>
+Dependency Track Upload (main only)<br>
+   ↓<br>
+Update values.yaml (GitOps trigger)<br>
+   ↓<br>
+Argo CD deploys to Kubernetes<br>
+
+
 🧱 1. Build & Test Job
 📌 Job: build-test
 Runs on:
